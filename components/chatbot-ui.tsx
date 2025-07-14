@@ -24,15 +24,16 @@ interface Message {
 // Define AIMessage type for AI SDK compatibility
 interface AIMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system'; // Added 'system' role
   content: string;
 }
 
 interface ChatbotUIProps {
   chatId: string;
+  systemPrompt: string;
 }
 
-const ChatbotUI: React.FC<ChatbotUIProps> = ({ chatId }) => {
+const ChatbotUI: React.FC<ChatbotUIProps> = ({ chatId, systemPrompt }) => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [messages, setMessages] = useState<AIMessage[]>([]);
   const [input, setInput] = useState('');
@@ -100,14 +101,14 @@ const ChatbotUI: React.FC<ChatbotUIProps> = ({ chatId }) => {
 
     setIsLoading(true);
     const userMessage: AIMessage = { id: Date.now().toString(), role: 'user', content: input };
-    const newMessages = [...messages, userMessage];
-    setMessages(newMessages);
+    const messagesToSend = systemPrompt ? [{ role: 'system', content: systemPrompt }, ...messages, userMessage] : [...messages, userMessage];
+    setMessages(prevMessages => [...prevMessages, userMessage]); // Update UI immediately with user message
     setInput('');
 
     try {
       const result = await streamText({
         model: openai.chat('gpt-4o-mini'),
-        messages: newMessages.map(msg => ({ role: msg.role, content: msg.content })),
+        messages: messagesToSend.map(msg => ({ role: msg.role, content: msg.content })) as any, // Cast to any for now, will refine if needed
       });
 
       let aiResponseContent = '';
@@ -161,7 +162,7 @@ const ChatbotUI: React.FC<ChatbotUIProps> = ({ chatId }) => {
                     'max-w-[70%] p-3 rounded-lg',
                     sender === 'user'
                       ? 'bg-primary text-primary-foreground'
-                      : 'bg-muted text-muted-foreground'
+                      : 'bg-transparent text-white'
                   )}
                 >
                   {message.content}

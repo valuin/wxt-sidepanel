@@ -31,6 +31,9 @@ import {
   MessageSquareText
 } from 'lucide-react'
 
+import { useState } from 'react'; // Add useState import
+import { systemPrompts } from '@/lib/system-prompt'; // Import systemPrompts
+
 function App() {
   const config = useAppConfig()
   const { appearance, system, ui, loading, updateAppearance, updateSystem, updateUI, resetSettings } = useSettings()
@@ -254,11 +257,11 @@ function App() {
           </TabsList>
 
           <TabsContent value="kalender" className="flex-1 overflow-hidden">
-            <ChatbotUI chatId="kalender" />
+            <ChatbotUI chatId="kalender" systemPrompt={systemPrompts.kalender} />
           </TabsContent>
 
           <TabsContent value="pos" className="flex-1 overflow-hidden">
-            <ChatbotUI chatId="pos" />
+            <ChatbotUI chatId="pos" systemPrompt={systemPrompts.pos} />
           </TabsContent>
 
         </Tabs>
