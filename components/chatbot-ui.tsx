@@ -1,12 +1,19 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useEffect, useRef, useMemo, useState } from 'react';
 import { storage } from '#imports';
 import { Textarea } from '@/components/ui/textarea';
 import { Button } from '@/components/ui/button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
 import { Send } from 'lucide-react';
+import { createOpenAI } from '@ai-sdk/openai';
+import { streamText } from 'ai';
 
-// Define message types
+const openai = createOpenAI({
+  baseURL: 'https://openrouter.ai/api/v1',
+  apiKey: '',
+});
+
+// Define message types for local storage
 interface Message {
   id: string;
   text: string;
@@ -14,14 +21,22 @@ interface Message {
   timestamp: number;
 }
 
+// Define AIMessage type for AI SDK compatibility
+interface AIMessage {
+  id: string;
+  role: 'user' | 'assistant';
+  content: string;
+}
+
 interface ChatbotUIProps {
   chatId: string;
 }
 
 const ChatbotUI: React.FC<ChatbotUIProps> = ({ chatId }) => {
-  const [input, setInput] = useState('');
-  const [messages, setMessages] = useState<Message[]>([]);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const [messages, setMessages] = useState<AIMessage[]>([]);
+  const [input, setInput] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
 
   // Define storage item for chat messages dynamically based on chatId, memoized
   const chatMessagesStorage = useMemo(() => {
@@ -33,38 +48,39 @@ const ChatbotUI: React.FC<ChatbotUIProps> = ({ chatId }) => {
   // Load messages from storage on component mount or when chatId changes
   useEffect(() => {
     const loadMessages = async () => {
-      const chatHistory = await chatMessagesStorage.getValue();
-      setMessages(chatHistory);
-    };
-    loadMessages();
-  }, [chatId]);
-
-  // Load messages from storage on component mount or when chatId changes
-  useEffect(() => {
-    const loadMessages = async () => {
       try {
         const chatHistory = await chatMessagesStorage.getValue();
-        setMessages(chatHistory);
+        const formattedMessages: AIMessage[] = chatHistory.map(msg => ({
+          id: msg.id,
+          role: msg.sender === 'user' ? 'user' : 'assistant',
+          content: msg.text,
+        }));
+        setMessages(formattedMessages);
       } catch (error) {
+        console.error(`[ChatbotUI - ${chatId}] Error loading messages from storage:`, error);
       }
     };
     loadMessages();
-  }, [chatId, chatMessagesStorage]);
+  }, [chatId, chatMessagesStorage]); // Removed setMessages from dependency array as it's a state setter
 
   // Save messages to storage whenever they change
   useEffect(() => {
     const saveMessages = async () => {
-      console.log(`[ChatbotUI - ${chatId}] Messages state changed. Attempting to save:`, messages);
+      const messagesToSave: Message[] = messages.map(msg => ({
+        id: msg.id,
+        text: msg.content,
+        sender: msg.role === 'user' ? 'user' : 'ai',
+        timestamp: Date.now(),
+      }));
+      console.log(`[ChatbotUI - ${chatId}] Messages state changed. Attempting to save:`, messagesToSave);
       try {
-        await chatMessagesStorage.setValue(messages);
+        await chatMessagesStorage.setValue(messagesToSave);
         console.log(`[ChatbotUI - ${chatId}] Successfully saved messages.`);
       } catch (error) {
         console.error(`[ChatbotUI - ${chatId}] Error saving messages:`, error);
       }
     };
-    // Only save if messages array has actually changed content, not just reference
-    // This check prevents unnecessary saves on initial load if fallback is empty
-    if (JSON.stringify(messages) !== JSON.stringify(chatMessagesStorage.fallback)) {
+    if (messages.length > 0) {
         saveMessages();
     }
   }, [messages, chatMessagesStorage, chatId]);
@@ -74,36 +90,55 @@ const ChatbotUI: React.FC<ChatbotUIProps> = ({ chatId }) => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const handleSendMessage = async () => {
-    if (input.trim()) {
-      const newUserMessage: Message = {
-        id: Date.now().toString(),
-        text: input.trim(),
-        sender: 'user',
-        timestamp: Date.now(),
-      };
-      console.log(`[ChatbotUI - ${chatId}] User sending message:`, newUserMessage);
-      setMessages((prevMessages) => [...prevMessages, newUserMessage]);
-      setInput('');
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    setInput(e.target.value);
+  };
 
-      // Placeholder for AI response
-      setTimeout(() => {
-        const newAiMessage: Message = {
-          id: (Date.now() + 1).toString(),
-          text: `AI response to: "${newUserMessage.text}"`,
-          sender: 'ai',
-          timestamp: Date.now() + 1,
-        };
-        console.log(`[ChatbotUI - ${chatId}] AI responding with:`, newAiMessage);
-        setMessages((prevMessages) => [...prevMessages, newAiMessage]);
-      }, 1000);
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement> | React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    if (!input.trim()) return;
+
+    setIsLoading(true);
+    const userMessage: AIMessage = { id: Date.now().toString(), role: 'user', content: input };
+    const newMessages = [...messages, userMessage];
+    setMessages(newMessages);
+    setInput('');
+
+    try {
+      const result = await streamText({
+        model: openai.chat('gpt-4o-mini'),
+        messages: newMessages.map(msg => ({ role: msg.role, content: msg.content })),
+      });
+
+      let aiResponseContent = '';
+      for await (const chunk of result.textStream) {
+        aiResponseContent += chunk;
+        setMessages(currentMessages => {
+          const lastMessage = currentMessages[currentMessages.length - 1];
+          if (lastMessage && lastMessage.role === 'assistant') {
+            return currentMessages.map((msg, index) =>
+              index === currentMessages.length - 1 ? { ...msg, content: aiResponseContent } : msg
+            );
+          } else {
+            return [...currentMessages, { id: Date.now().toString(), role: 'assistant', content: aiResponseContent }];
+          }
+        });
+      }
+    } catch (error) {
+      console.error(`[ChatbotUI - ${chatId}] Error during AI stream:`, error);
+      setMessages(currentMessages => [
+        ...currentMessages,
+        { id: Date.now().toString(), role: 'assistant', content: 'Error: Unable to get a response.' },
+      ]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSendMessage();
+      handleSubmit(e as any);
     }
   };
 
@@ -111,26 +146,29 @@ const ChatbotUI: React.FC<ChatbotUIProps> = ({ chatId }) => {
     <div className="flex flex-col h-full">
       <ScrollArea className="flex-1 p-4">
         <div className="flex flex-col space-y-4">
-          {messages.map((message) => (
-            <div
-              key={message.id}
-              className={cn(
-                'flex',
-                message.sender === 'user' ? 'justify-end' : 'justify-start'
-              )}
-            >
+          {messages.map((message: AIMessage) => {
+            const sender = message.role === 'user' ? 'user' : 'ai';
+            return (
               <div
+                key={message.id}
                 className={cn(
-                  'max-w-[70%] p-3 rounded-lg',
-                  message.sender === 'user'
-                    ? 'bg-primary text-primary-foreground'
-                    : 'bg-muted text-muted-foreground'
+                  'flex',
+                  sender === 'user' ? 'justify-end' : 'justify-start'
                 )}
               >
-                {message.text}
+                <div
+                  className={cn(
+                    'max-w-[70%] p-3 rounded-lg',
+                    sender === 'user'
+                      ? 'bg-primary text-primary-foreground'
+                      : 'bg-muted text-muted-foreground'
+                  )}
+                >
+                  {message.content}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
           <div ref={messagesEndRef} />
         </div>
       </ScrollArea>
@@ -138,12 +176,12 @@ const ChatbotUI: React.FC<ChatbotUIProps> = ({ chatId }) => {
         <Textarea
           placeholder="Type your message..."
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={handleInputChange}
           onKeyDown={handleKeyDown}
           className="flex-1 resize-none"
           rows={1}
         />
-        <Button onClick={handleSendMessage} disabled={!input.trim()}>
+        <Button onClick={handleSubmit as any} disabled={!input.trim() || isLoading}>
           <Send className="h-4 w-4" />
         </Button>
       </div>

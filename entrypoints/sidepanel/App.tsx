@@ -76,9 +76,9 @@ function App() {
             <Heart className="h-5 w-5 text-primary-foreground" />
           </div>
           <div>
-            <h1 className="font-semibold text-lg">Sidepanel Template</h1>
+            <h1 className="font-semibold text-lg">Jatevo AI Chat Extension</h1>
             <p className="text-sm text-muted-foreground">
-              WXT + Tailwind CSS 4.0 + shadcn/ui
+              Powered with Jatevo AI + RAG
             </p>
           </div>
         </div>
