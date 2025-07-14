@@ -32,14 +32,14 @@ const systemSettings = storage.defineItem<SystemSettings>('local:systemSettings'
 
 const uiSettings = storage.defineItem<UISettings>('local:uiSettings', {
   fallback: {
-    activeTab: 'home'
+    activeTab: 'kalender'
   }
 })
 
 export function useSettings() {
   const [appearance, setAppearance] = useState<AppearanceSettings>({ theme: 'system' })
   const [system, setSystem] = useState<SystemSettings>({ notifications: true, syncInterval: 15 })
-  const [ui, setUI] = useState<UISettings>({ activeTab: 'home' })
+  const [ui, setUI] = useState<UISettings>({ activeTab: 'kalender' })
   const [loading, setLoading] = useState(true)
 
   // Load settings
@@ -110,7 +110,7 @@ export function useSettings() {
       // Reset to default values
       const defaultAppearance = { theme: 'system' as Theme }
       const defaultSystem = { notifications: true, syncInterval: 15 }
-      const defaultUI = { activeTab: 'home' }
+      const defaultUI = { activeTab: 'kalender' }
       
       setAppearance(defaultAppearance)
       setSystem(defaultSystem)
